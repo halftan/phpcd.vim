@@ -517,7 +517,7 @@ class PHPCD
     {
         $file = new SplFileObject($path);
         $s = [
-            'namespace' => '',
+            'namespace' => "\\",
             'imports' => [
             ],
         ];

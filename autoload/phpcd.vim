@@ -45,7 +45,7 @@ function! phpcd#CompletePHP(findstart, base) " {{{
 		let winheight = winheight(0)
 		let winnr = winnr()
 
-		let [current_namespace, imports] = phpcd#GetCurrentNameSpace(getline(0, line('.')))
+		let [current_namespace, imports] = phpcd#GetCurrentNameSpace()
 
 		if context =~? '^use\s' || context ==? 'use' " {{{
 			" TODO complete use
@@ -217,7 +217,7 @@ function! phpcd#GetCurrentSymbolWithContext() " {{{
 	let context = substitute(current_instruction, '\s*[$a-zA-Z_0-9\\\x7f-\xff]*$', '', '')
 	let context = substitute(context, '\s\+\([\-:]\)', '\1', '')
 
-	let [current_namespace, current_imports] = phpcd#GetCurrentNameSpace(getline(0, line('.')))
+	let [current_namespace, current_imports] = phpcd#GetCurrentNameSpace()
 	let [symbol, symbol_namespace] = phpcd#ExpandClassName(word, current_namespace, current_imports)
 
 	return [symbol, context, symbol_namespace, current_imports]
@@ -979,7 +979,7 @@ endfunction " }}}
 
 function! phpcd#GetCurrentClassName() " {{{
 	let [start_line, start_col] = searchpos('class', 'n')
-	let [current_namespace, imports] = phpcd#GetCurrentNameSpace(getline(0, start_line))
+	let [current_namespace, imports] = phpcd#GetCurrentNameSpace()
 	" 假设文件名就是类名，去掉 .php 后缀
 	let file_name = expand('%:t')[:-5]
 
@@ -1145,97 +1145,10 @@ function! phpcd#GetTypeFromDocBlockParam(docblock_type) " {{{
 
 endfunction " }}}
 
-function! phpcd#GetCurrentNameSpace(file_lines) " {{{
-	let original_window = winnr()
+function! phpcd#GetCurrentNameSpace() " {{{
+	let nsuse = rpcrequest(g:phpcd_channel_id, 'nsuse', expand('%:p'))
 
-	silent! below 1new
-	silent! 0put =a:file_lines
-	silent! exec "setlocal ft=phpcompletetempbuffer"
-	normal! G
-
-	" clear out classes, functions and other blocks
-	while 1
-		let block_start_pos = searchpos('\c\(class\|trait\|function\|interface\)\s\+\_.\{-}\zs{', 'Web')
-		if block_start_pos == [0, 0]
-			break
-		endif
-		let block_end_pos = searchpairpos('{', '', '}\|\%$', 'W', 'synIDattr(synID(line("."), col("."), 0), "name") =~? "string\\|comment"')
-
-		if block_end_pos != [0, 0]
-			" end of the block found, just delete it
-			silent! exec block_start_pos[0].','.block_end_pos[0].'d _'
-		else
-			" block pair not found, use block start as beginning and the end
-			" of the buffer instead
-			silent! exec block_start_pos[0].',$d _'
-		endif
-	endwhile
-	normal! G
-
-	" grab the remains
-	let file_lines = reverse(getline(1, line('.') - 1))
-
-	silent! bw! %
-	exe original_window.'wincmd w'
-
-	let namespace_name_pattern = '[a-zA-Z_\x7f-\xff\\][a-zA-Z_0-9\x7f-\xff\\]*'
-	let i = 0
-	let file_length = len(file_lines)
-	let imports = {}
-	let current_namespace = '\'
-
-	while i < file_length
-		let line = file_lines[i]
-
-		if line =~? '^\(<?php\)\?\s*namespace\s*'.namespace_name_pattern
-			let current_namespace = matchstr(line, '\c^\(<?php\)\?\s*namespace\s*\zs'.namespace_name_pattern.'\ze')
-			break
-		endif
-
-		if line =~? '^\s*use\>'
-			if line =~? ';' " {{{
-				let use_line = line
-			else
-				" try to find the next line containing ';'
-				let l = i
-				let search_line = line
-				let use_line = line
-
-				" add lines from the file until theres no ';' in them
-				while search_line !~? ';' && l > 0
-					" file lines are reversed so we need to go backwards
-					let l -= 1
-					let search_line = file_lines[l]
-					let use_line .= ' '.substitute(search_line, '\(^\s\+\|\s\+$\)', '', 'g')
-				endwhile
-			endif " }}}
-			let use_expression = matchstr(use_line, '^\c\s*use\s\+\zs.\{-}\ze;')
-			let use_parts = map(split(use_expression, '\s*,\s*'), 'substitute(v:val, "\\s+", " ", "g")')
-			for part in use_parts " {{{
-				if part =~? '\s\+as\s\+'
-					let [object, name] = split(part, '\s\+as\s\+\c')
-					let object = substitute(object, '^\\', '', '')
-					let name   = substitute(name, '^\\', '', '')
-				else
-					let object = part
-					let name = part
-					let object = substitute(object, '^\\', '', '')
-					let name   = substitute(name, '^\\', '', '')
-					if name =~? '\\'
-						let	name = matchstr(name, '\\\zs[^\\]\+\ze$')
-					endif
-				endif
-				" leading slash is not required use imports are always absolute
-				let imports[name] = {'name': object, 'kind': ''}
-			endfor " }}}
-		endif
-		let i += 1
-	endwhile
-	let sorted_imports = {}
-	for name in sort(keys(imports))
-		let sorted_imports[name] = imports[name]
-	endfor
-	return [current_namespace, sorted_imports]
+	return [nsuse.namespace, nsuse.imports]
 endfunction " }}}
 
 function! phpcd#GetCurrentFunctionBoundaries() " {{{
